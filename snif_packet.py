@@ -12,6 +12,7 @@ flow_statistics = {}
 
 PROTOCOLS = {6: 'TCP', 17: 'UDP'}
 
+#clean each flow and delete it after the timeout
 def clean_expired_flows(current_timestamp):
     flows_to_remove = []
 
@@ -27,7 +28,8 @@ def clean_expired_flows(current_timestamp):
         print(f"[FLOW ENDED] {flow_key}")
 
         flow_statistics[flow_key] = {
-            'packets': active_flows[flow_key]['packets'],
+            'fwd_packets': active_flows[flow_key]['fwd_packets'],
+            'bwd_packets': active_flows[flow_key]['bwd_packets'],
             'protocol': active_flows[flow_key]['protocol'],
             'total_bytes': active_flows[flow_key]['total_bytes'],
             'duration': active_flows[flow_key]['last_time'] - active_flows[flow_key]['start_time'],
@@ -42,19 +44,27 @@ def clean_expired_flows(current_timestamp):
 
     return len(flows_to_remove)
 
-def create_or_update_flow(flow_key, timestamp, packet_size, protocol):
-    # Create a new flow entry or update an existing one
-    # with packet count, timing, and byte totals
+def create_or_update_flow(flow_key, timestamp, packet_size, protocol, source_ip, source_port):
+ 
     if flow_key in active_flows:
-        active_flows[flow_key]['packets'] += 1
         active_flows[flow_key]['last_time'] = timestamp
         active_flows[flow_key]['duration'] = timestamp - active_flows[flow_key]['start_time']
         active_flows[flow_key]['total_bytes'] += packet_size
 
-        print(f"[{protocol} UPDATE] {flow_key} - Packets: {active_flows[flow_key]['packets']}")
+        # Classify packet as forward or backward based on who initiated the flow
+        if source_ip == active_flows[flow_key]['fwd_src_ip'] and source_port == active_flows[flow_key]['fwd_src_port']:
+            active_flows[flow_key]['fwd_packets'] += 1
+        else:
+            active_flows[flow_key]['bwd_packets'] += 1
+
+        total = active_flows[flow_key]['fwd_packets'] + active_flows[flow_key]['bwd_packets']
+        print(f"[{protocol} UPDATE] {flow_key} - Fwd: {active_flows[flow_key]['fwd_packets']} Bwd: {active_flows[flow_key]['bwd_packets']} Total: {total}")
     else:
         active_flows[flow_key] = {
-            'packets': 1,
+            'fwd_packets': 1,
+            'bwd_packets': 0,
+            'fwd_src_ip': source_ip,
+            'fwd_src_port': source_port,
             'start_time': timestamp,
             'last_time': timestamp,
             'protocol': protocol,
@@ -64,8 +74,8 @@ def create_or_update_flow(flow_key, timestamp, packet_size, protocol):
 
         print(f"[NEW {protocol}] {flow_key}")
 
+#extract udp packets and added it to the flow tuple
 def process_udp_packet(ip_packet, udp_packet, timestamp):
-    # Extract UDP packet info and register it as a flow
     source_ip = ip_packet.src
     destination_ip = ip_packet.dst
     source_port = udp_packet.sport
@@ -74,11 +84,11 @@ def process_udp_packet(ip_packet, udp_packet, timestamp):
 
     flow_key = (source_ip, destination_ip, source_port, destination_port, 'UDP')
 
-    create_or_update_flow(flow_key, timestamp, packet_size, 'UDP')
+    create_or_update_flow(flow_key, timestamp, packet_size, 'UDP', source_ip, source_port)
 
+#extract tcp packets and added it to the flow tuple
 def process_tcp_packet(ip_packet, tcp_packet, timestamp):
-    # Extract TCP packet info including flags and sequence numbers,
-    # register it as a flow and detect connection closures (FIN/RST)
+    
     source_ip = ip_packet.src
     destination_ip = ip_packet.dst
     source_port = tcp_packet.sport
@@ -92,15 +102,16 @@ def process_tcp_packet(ip_packet, tcp_packet, timestamp):
 
     flow_key = (source_ip, destination_ip, source_port, destination_port, 'TCP')
 
-    create_or_update_flow(flow_key, timestamp, packet_size, 'TCP')
+    create_or_update_flow(flow_key, timestamp, packet_size, 'TCP', source_ip, source_port)
 
     if tcp_flags & 0x01 or tcp_flags & 0x04:  # FIN or RST
         if flow_key in active_flows:
             print(f"[TCP CLOSED] {flow_key}")
 
+    
+
 def analyze_packet(packet):
-    # Main packet callback: cleans expired flows, checks for IP layer,
-    # and dispatches to the appropriate protocol handler
+
     try:
         timestamp = packet.time
 
@@ -125,9 +136,9 @@ def analyze_packet(packet):
     except Exception as error:
         print(f"[ERROR] {error}")
 
+#print the flows
 def display_final_statistics():
-    # Print a summary report of all active and ended flows
-    # including packet counts, byte totals, and durations
+    
     print("\n" + "="*50)
     print("           FINAL REPORT")
     print("="*50)
@@ -137,8 +148,10 @@ def display_final_statistics():
         print("-" * 30)
         for flow_key, stats in active_flows.items():
             duration = stats['last_time'] - stats['start_time']
-            print(f"\nFlow: {flow_key[0]}:{flow_key[2]} -> {flow_key[1]}:{flow_key[3]} ({flow_key[4]})")
-            print(f"  Packets: {stats['packets']}")
+            print(f"\nFlow: {flow_key[0]}: SRCPORT : {flow_key[2]} -> {flow_key[1]}: DSTPORT : {flow_key[3]} ({flow_key[4]})")
+            print(f"  Fwd Packets: {stats['fwd_packets']}")
+            print(f"  Bwd Packets: {stats['bwd_packets']}")
+            print(f"  Total Packets: {stats['fwd_packets'] + stats['bwd_packets']}")
             print(f"  Bytes: {stats['total_bytes']:,}")
             print(f"  Duration: {duration:.3f}s")
 
@@ -147,23 +160,25 @@ def display_final_statistics():
         print("-" * 30)
         for flow_key, stats in flow_statistics.items():
             print(f"\nFlow: {flow_key[0]}:{flow_key[2]} -> {flow_key[1]}:{flow_key[3]} ({flow_key[4]})")
-            print(f"  Packets: {stats['packets']}")
+            print(f"  Fwd Packets: {stats['fwd_packets']}")
+            print(f"  Bwd Packets: {stats['bwd_packets']}")
+            print(f"  Total Packets: {stats['fwd_packets'] + stats['bwd_packets']}")
             print(f"  Bytes: {stats['total_bytes']:,}")
             print(f"  Duration: {stats['duration']:.3f}s")
 
     print(f"\nTotal flows analyzed: {len(active_flows) + len(flow_statistics)}")
 
 def main():
-    # Entry point: starts the network sniffer on the configured interface
-    # and displays final statistics on exit
-    print("="*50)
-    print("    NETWORK FLOW ANALYZER")
-    print("="*50)
-    print(f"Interface: {NETWORK_INTERFACE}")
+ 
+    print("="*80)
+    print("    analyzer flow")
+    print("="*80)
+    print(f"name Interface: {NETWORK_INTERFACE}")
     print(f"Timeout UDP: {UDP_FLOW_TIMEOUT}s | TCP: {TCP_FLOW_TIMEOUT}s")
-    print(f"Starting... (Ctrl+C to stop)")
-    print("="*50)
+    print(f"Starting...")
+    print("="*80)
 
+    #snif packets 
     try:
         sniff(iface=NETWORK_INTERFACE, prn=analyze_packet , count = 100)
 
