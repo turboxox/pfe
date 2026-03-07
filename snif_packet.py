@@ -27,17 +27,19 @@ def clean_expired_flows(current_timestamp):
     for flow_key in flows_to_remove:
         print(f"[FLOW ENDED] {flow_key}")
 
+        #copy summary before del
         flow_statistics[flow_key] = {
             'fwd_packets': active_flows[flow_key]['fwd_packets'],
             'bwd_packets': active_flows[flow_key]['bwd_packets'],
             'protocol': active_flows[flow_key]['protocol'],
-            'total_bytes': active_flows[flow_key]['total_bytes'],
             'duration': active_flows[flow_key]['last_time'] - active_flows[flow_key]['start_time'],
             'source_ip': flow_key[0],
             'destination_ip': flow_key[1],
             'source_port': flow_key[2],
             'destination_port': flow_key[3],
-            'natural_end': False
+            'natural_end': False,
+            'fwd_pack_len_max':max(active_flows[flow_key]['fwd_packet_sizes']) if active_flows[flow_key]['fwd_packet_sizes'] else 0,#we add the if bc it could crashout if the list is empty
+            'fwd_pack_len_min':min(active_flows[flow_key]['fwd_packet_sizes'])
         }
 
         del active_flows[flow_key]
@@ -49,16 +51,19 @@ def create_or_update_flow(flow_key, timestamp, packet_size, protocol, source_ip,
     if flow_key in active_flows:
         active_flows[flow_key]['last_time'] = timestamp
         active_flows[flow_key]['duration'] = timestamp - active_flows[flow_key]['start_time']
-        active_flows[flow_key]['total_bytes'] += packet_size
 
-        # Classify packet as forward or backward based on who initiated the flow
+        #check if the flow is forw or backw
         if source_ip == active_flows[flow_key]['fwd_src_ip'] and source_port == active_flows[flow_key]['fwd_src_port']:
             active_flows[flow_key]['fwd_packets'] += 1
+            active_flows[flow_key]['fwd_packet_sizes'].append(packet_size)
+            active_flows[flow_key]['fwd_total_bytes'] += packet_size
         else:
             active_flows[flow_key]['bwd_packets'] += 1
+            active_flows[flow_key]['bwd_packet_sizes'].append(packet_size)
+            active_flows[flow_key]['bwd_total_bytes'] += packet_size
 
         total = active_flows[flow_key]['fwd_packets'] + active_flows[flow_key]['bwd_packets']
-        print(f"[{protocol} UPDATE] {flow_key} - Fwd: {active_flows[flow_key]['fwd_packets']} Bwd: {active_flows[flow_key]['bwd_packets']} Total: {total}")
+        print(f"[{protocol} UPDATE] {flow_key} - Fwd: {active_flows[flow_key]['fwd_packets']} |||  Bwd: {active_flows[flow_key]['bwd_packets']} Total: {total}")
     else:
         active_flows[flow_key] = {
             'fwd_packets': 1,
@@ -68,7 +73,10 @@ def create_or_update_flow(flow_key, timestamp, packet_size, protocol, source_ip,
             'start_time': timestamp,
             'last_time': timestamp,
             'protocol': protocol,
-            'total_bytes': packet_size,
+            'fwd_packet_sizes': [packet_size],
+            'bwd_packet_sizes': [],
+            'fwd_total_bytes': packet_size,
+            'bwd_total_bytes': 0,
             'duration': 0.0
         }
 
@@ -152,7 +160,6 @@ def display_final_statistics():
             print(f"  Fwd Packets: {stats['fwd_packets']}")
             print(f"  Bwd Packets: {stats['bwd_packets']}")
             print(f"  Total Packets: {stats['fwd_packets'] + stats['bwd_packets']}")
-            print(f"  Bytes: {stats['total_bytes']:,}")
             print(f"  Duration: {duration:.3f}s")
 
     if flow_statistics:
@@ -163,7 +170,6 @@ def display_final_statistics():
             print(f"  Fwd Packets: {stats['fwd_packets']}")
             print(f"  Bwd Packets: {stats['bwd_packets']}")
             print(f"  Total Packets: {stats['fwd_packets'] + stats['bwd_packets']}")
-            print(f"  Bytes: {stats['total_bytes']:,}")
             print(f"  Duration: {stats['duration']:.3f}s")
 
     print(f"\nTotal flows analyzed: {len(active_flows) + len(flow_statistics)}")
@@ -180,7 +186,7 @@ def main():
 
     #snif packets 
     try:
-        sniff(iface=NETWORK_INTERFACE, prn=analyze_packet , count = 100)
+        sniff(iface=NETWORK_INTERFACE, prn=analyze_packet )
 
     except KeyboardInterrupt:
         print("\n\nStopped by user")
