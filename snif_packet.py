@@ -1,6 +1,7 @@
 from scapy.all import *
 from datetime import datetime
 import sys
+import statistics
 
 UDP_FLOW_TIMEOUT = 5
 TCP_FLOW_TIMEOUT = 8
@@ -12,7 +13,7 @@ flow_statistics = {}
 
 PROTOCOLS = {6: 'TCP', 17: 'UDP'}
 
-#clean each flow and delete it after the timeout
+#!clean each flow and delete it after the timeout
 def clean_expired_flows(current_timestamp):
     flows_to_remove = []
 
@@ -29,8 +30,6 @@ def clean_expired_flows(current_timestamp):
 
         #copy summary before del
         flow_statistics[flow_key] = {
-            'fwd_packets': active_flows[flow_key]['fwd_packets'],
-            'bwd_packets': active_flows[flow_key]['bwd_packets'],
             'protocol': active_flows[flow_key]['protocol'],
             'duration': active_flows[flow_key]['last_time'] - active_flows[flow_key]['start_time'],
             'source_ip': flow_key[0],
@@ -38,8 +37,16 @@ def clean_expired_flows(current_timestamp):
             'source_port': flow_key[2],
             'destination_port': flow_key[3],
             'natural_end': False,
+            'fwd_packets': active_flows[flow_key]['fwd_packets'],
+            'bwd_packets': active_flows[flow_key]['bwd_packets'],
             'fwd_pack_len_max':max(active_flows[flow_key]['fwd_packet_sizes']) if active_flows[flow_key]['fwd_packet_sizes'] else 0,#we add the if bc it could crashout if the list is empty
-            'fwd_pack_len_min':min(active_flows[flow_key]['fwd_packet_sizes'])
+            'fwd_pack_len_min':min(active_flows[flow_key]['fwd_packet_sizes']) if active_flows[flow_key]['fwd_packet_sizes'] else 0,
+            'fwd_pack_len_mean':statistics.mean(active_flows[flow_key]['fwd_packet_sizes']) if active_flows[flow_key]['fwd_packet_sizes'] else 0,
+            'fwd_pack_len_std':statistics.stdev(active_flows[flow_key]['fwd_packet_sizes']) if len(active_flows[flow_key]['fwd_packet_sizes']) > 1 else 0, #!whenever std is close to 0 its maybe an atack
+            'bwd_pack_len_max':max(active_flows[flow_key]['bwd_packet_sizes']) if active_flows[flow_key]['bwd_packet_sizes'] else 0,
+            'bwd_pack_len_min':min(active_flows[flow_key]['bwd_packet_sizes'])if active_flows[flow_key]['bwd_packet_sizes'] else 0,
+            'bwd_pack_len_mean':statistics.mean(active_flows[flow_key]['bwd_packet_sizes']) if active_flows[flow_key]['bwd_packet_sizes'] else 0,
+            'bwd_pack_len_std':statistics.stdev(active_flows[flow_key]['bwd_packet_sizes']) if len(active_flows[flow_key]['bwd_packet_sizes']) > 1 else 0
         }
 
         del active_flows[flow_key]
@@ -91,6 +98,11 @@ def process_udp_packet(ip_packet, udp_packet, timestamp):
     packet_size = ip_packet.len
 
     flow_key = (source_ip, destination_ip, source_port, destination_port, 'UDP')
+    reverse_key = (destination_ip, source_ip, destination_port, source_port, 'UDP')
+
+    # if the reverse flow already exists, use that key so this packet counts as backward
+    if reverse_key in active_flows:
+        flow_key = reverse_key
 
     create_or_update_flow(flow_key, timestamp, packet_size, 'UDP', source_ip, source_port)
 
@@ -109,6 +121,11 @@ def process_tcp_packet(ip_packet, tcp_packet, timestamp):
     window_size = tcp_packet.window
 
     flow_key = (source_ip, destination_ip, source_port, destination_port, 'TCP')
+    reverse_key = (destination_ip, source_ip, destination_port, source_port, 'TCP')
+
+    # if the reverse flow already exists, use that key so this packet counts as backward
+    if reverse_key in active_flows:
+        flow_key = reverse_key
 
     create_or_update_flow(flow_key, timestamp, packet_size, 'TCP', source_ip, source_port)
 
@@ -144,13 +161,14 @@ def analyze_packet(packet):
     except Exception as error:
         print(f"[ERROR] {error}")
 
-#print the flows
+#*print the flows
 def display_final_statistics():
     
     print("\n" + "="*50)
     print("           FINAL REPORT")
     print("="*50)
 
+    #!printing active flows
     if active_flows:
         print(f"\nACTIVE FLOWS ({len(active_flows)}):")
         print("-" * 30)
@@ -162,6 +180,8 @@ def display_final_statistics():
             print(f"  Total Packets: {stats['fwd_packets'] + stats['bwd_packets']}")
             print(f"  Duration: {duration:.3f}s")
 
+
+    #!printing ending flow
     if flow_statistics:
         print(f"\nENDED FLOWS ({len(flow_statistics)}):")
         print("-" * 30)
@@ -171,6 +191,10 @@ def display_final_statistics():
             print(f"  Bwd Packets: {stats['bwd_packets']}")
             print(f"  Total Packets: {stats['fwd_packets'] + stats['bwd_packets']}")
             print(f"  Duration: {stats['duration']:.3f}s")
+            print(f"  Fwd_pack_len_mean is :{stats['fwd_pack_len_mean']}")
+            print(f"  Fwd_pack_len_std is : {stats['fwd_pack_len_std']}")
+            print(f"  Bwd_pack_len_mean is :{stats['bwd_pack_len_mean']}")
+            print(f"  Bwd_pack_len_std is : {stats['bwd_pack_len_std']}")
 
     print(f"\nTotal flows analyzed: {len(active_flows) + len(flow_statistics)}")
 
@@ -184,7 +208,8 @@ def main():
     print(f"Starting...")
     print("="*80)
 
-    #snif packets 
+    
+    #*snif packets 
     try:
         sniff(iface=NETWORK_INTERFACE, prn=analyze_packet )
 

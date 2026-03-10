@@ -1,3 +1,4 @@
-L = [12,3,88,1039,22,19,0,0,0.5]
-res = max(L)
-print(res)
+import statistics
+L = [1,2,12,99]
+print(statistics.stdev(L))
+print("yes") if len(L) > 1 else print("no")
