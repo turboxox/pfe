@@ -27,6 +27,9 @@ def clean_expired_flows(current_timestamp):
 
     for flow_key in flows_to_remove:
         print(f"[FLOW ENDED] {flow_key}")
+        fwd_packets = active_flows[flow_key]['fwd_packet_sizes']
+        bwd_packets = active_flows[flow_key]['bwd_packet_sizes']
+        total_packets = fwd_packets+bwd_packets
 
         #copy summary before del
         flow_statistics[flow_key] = {
@@ -37,7 +40,7 @@ def clean_expired_flows(current_timestamp):
             'source_port': flow_key[2],
             'destination_port': flow_key[3],
             'natural_end': False,
-            'fwd_packets': active_flows[flow_key]['fwd_packets'],
+            #'fwd_packets': active_flows[flow_key]['fwd_packets'],
             'bwd_packets': active_flows[flow_key]['bwd_packets'],
             'fwd_pack_len_max':max(active_flows[flow_key]['fwd_packet_sizes']) if active_flows[flow_key]['fwd_packet_sizes'] else 0,#we add the if bc it could crashout if the list is empty
             'fwd_pack_len_min':min(active_flows[flow_key]['fwd_packet_sizes']) if active_flows[flow_key]['fwd_packet_sizes'] else 0,
@@ -46,13 +49,27 @@ def clean_expired_flows(current_timestamp):
             'bwd_pack_len_max':max(active_flows[flow_key]['bwd_packet_sizes']) if active_flows[flow_key]['bwd_packet_sizes'] else 0,
             'bwd_pack_len_min':min(active_flows[flow_key]['bwd_packet_sizes'])if active_flows[flow_key]['bwd_packet_sizes'] else 0,
             'bwd_pack_len_mean':statistics.mean(active_flows[flow_key]['bwd_packet_sizes']) if active_flows[flow_key]['bwd_packet_sizes'] else 0,
-            'bwd_pack_len_std':statistics.stdev(active_flows[flow_key]['bwd_packet_sizes']) if len(active_flows[flow_key]['bwd_packet_sizes']) > 1 else 0
+            'bwd_pack_len_std':statistics.stdev(active_flows[flow_key]['bwd_packet_sizes']) if len(active_flows[flow_key]['bwd_packet_sizes']) > 1 else 0,
+            'min_packet_len':min(active_flows[flow_key]['fwd_packet_sizes']+active_flows[flow_key]['bwd_packet_sizes']) 
+                             if len(active_flows[flow_key]['fwd_packet_sizes']+active_flows[flow_key]['bwd_packet_sizes']) else 0,
+            'max_packet_len':max(active_flows[flow_key]['fwd_packet_sizes']+active_flows[flow_key]['bwd_packet_sizes']) 
+                             if len(active_flows[flow_key]['fwd_packet_sizes']+active_flows[flow_key]['bwd_packet_sizes']) else 0,
+            'packet_length_mean':statistics.mean(active_flows[flow_key]['fwd_packet_sizes']+active_flows[flow_key]['bwd_packet_sizes']) 
+                                if active_flows[flow_key]['fwd_packet_sizes']+active_flows[flow_key]['bwd_packet_sizes'] else 0,
+            'packet_length_std':statistics.stdev(active_flows[flow_key]['fwd_packet_sizes']+active_flows[flow_key]['bwd_packet_sizes']) 
+                                if len(active_flows[flow_key]['fwd_packet_sizes']) > 1  and len(active_flows[flow_key]['bwd_packet_sizes']) > 1  else 0,
+            'variance':statistics.variance(active_flows[flow_key]['fwd_packet_sizes']+active_flows[flow_key]['bwd_packet_sizes'])
+                        if len(active_flows[flow_key]['fwd_packet_sizes']) > 1  and len(active_flows[flow_key]['bwd_packet_sizes']) > 1  else 0,
+            'average':statistics.mean(active_flows[flow_key]['fwd_packet_sizes']+active_flows[flow_key]['bwd_packet_sizes']) 
+                                if active_flows[flow_key]['fwd_packet_sizes']+active_flows[flow_key]['bwd_packet_sizes'] else 0,
+            'flow_bytes_sec':total_packets / active_flows[flow_key]['duration'] if active_flows[flow_key]['duration'] else 0                    
         }
 
         del active_flows[flow_key]
 
     return len(flows_to_remove)
 
+#!heart of the code here is where i creat flow or update it
 def create_or_update_flow(flow_key, timestamp, packet_size, protocol, source_ip, source_port):
  
     if flow_key in active_flows:
@@ -195,7 +212,14 @@ def display_final_statistics():
             print(f"  Fwd_pack_len_std is : {stats['fwd_pack_len_std']}")
             print(f"  Bwd_pack_len_mean is :{stats['bwd_pack_len_mean']}")
             print(f"  Bwd_pack_len_std is : {stats['bwd_pack_len_std']}")
-
+            print(f"  min_packet_len : {stats['min_packet_len']}")
+            print(f"  max_packet_len :{stats['max_packet_len']}")
+            print(f"  packet_length_mean :{stats['packet_length_mean']}")
+            print(f"  packet_length_std :{stats['packet_length_std']}")
+            print(f"  variance is :{stats['variance']}")
+            print(f"  average is : {stats['average']}")
+    
+    
     print(f"\nTotal flows analyzed: {len(active_flows) + len(flow_statistics)}")
 
 def main():
