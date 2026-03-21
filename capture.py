@@ -11,7 +11,6 @@ ACTIVITY_THRESHOLD = 1.0
 active_flows = {}
 expired_flows = {}
 flow_statistics = {}
-FEATURE_ORDER ={}
 
 PROTOCOLS = {6: 'TCP', 17: 'UDP'}
 
