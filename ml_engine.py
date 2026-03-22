@@ -2,7 +2,10 @@ import joblib
 import numpy as np
 import json
 import os
+import warnings
 from datetime import datetime
+
+#NORMAL_PORT_WHITELIST = {53, 5353, 1900}
 
 FEATURE_ORDER = [
     'destination_port',
@@ -56,7 +59,10 @@ def load_models(path: str):
     rf = joblib.load(path + "/models/random_forest_sur.pkl")
     iso = joblib.load(path + "/models/isolation_forest.pkl")
     scaler = joblib.load(path + "/models/scaler.pkl")
-    encoder = joblib.load(path + "/models/label_encoder_sur.pkl")
+    encoder_path = path + "/models/label_encoder.pkl"
+    if not os.path.exists(encoder_path):
+        encoder_path = path + "/models/label_encoder_sur.pkl"
+    encoder = joblib.load(encoder_path)
 
     return rf, iso, scaler, encoder
 
@@ -66,6 +72,16 @@ def build_feature_vector(flow_statistics):
     for key in FEATURE_ORDER:
         feature_values.append(flow_statistics.get(key, 0))#!if the key is missing put 0 in it to not crash
     return np.array(feature_values)
+
+
+def scale_features(feature_vector, scaler):
+    with warnings.catch_warnings():
+        warnings.filterwarnings(
+            "ignore",
+            message="X does not have valid feature names, but RobustScaler was fitted with feature names",
+            category=UserWarning,
+        )
+        return scaler.transform(feature_vector.reshape(1, -1))
 
  
 #check if its normal or annormal atack 
@@ -114,3 +130,37 @@ def save_alert(alert):
     os.makedirs('alerts', exist_ok=True)
     with open('alerts/ids_log.json', 'a') as alert_file:
         alert_file.write(json.dumps(alert) + '\n')
+
+
+def process_flow(flow_statistics, models):
+    rf, iso, scaler, encoder = models
+
+    feature_vector = build_feature_vector(flow_statistics)
+    scaled_vector = scale_features(feature_vector, scaler)
+    prediction_result = predict(scaled_vector, iso, rf, encoder)
+
+    if prediction_result is None:
+        return
+
+    attack_type = prediction_result['attack_type']
+    confidence = prediction_result['confidence']
+
+    #if confidence < 60:
+        #return
+
+    #destination_port = flow_statistics.get('destination_port')
+    #if destination_port in NORMAL_PORT_WHITELIST:
+        #return
+
+    alert = build_alert(flow_statistics, attack_type, confidence)
+    save_alert(alert)
+
+    print(
+        f"[DETECTED] {attack_type} | "
+        f"src={alert['src_ip']} -> dst={alert['dst_ip']} | "
+        f"confidence={alert['confidence']}%"
+    )
+
+    return alert
+
+

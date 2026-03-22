@@ -1,3 +1,4 @@
+import ml_engine
 from scapy.all import *
 from datetime import datetime
 import sys
@@ -11,6 +12,7 @@ ACTIVITY_THRESHOLD = 1.0
 active_flows = {}
 expired_flows = {}
 flow_statistics = {}
+models = None
 
 PROTOCOLS = {6: 'TCP', 17: 'UDP'}
 
@@ -69,11 +71,11 @@ def clean_expired_flows(current_timestamp):
 
         #copy summary before del
         flow_statistics[flow_key] = {
-            # 'protocol': active_flows[flow_key]['protocol'],
+            'protocol': active_flows[flow_key]['protocol'],
             'duration': active_flows[flow_key]['last_time'] - active_flows[flow_key]['start_time'],
-            # 'source_ip': flow_key[0],
-            # 'destination_ip': flow_key[1],
-            # 'source_port': flow_key[2],
+            'source_ip': flow_key[0],
+            'destination_ip': flow_key[1],
+            'source_port': flow_key[2],
             'destination_port': flow_key[3],
             # 'natural_end': False,
             'fwd_packet_count': active_flows[flow_key]['fwd_packet_count'],
@@ -148,6 +150,8 @@ def clean_expired_flows(current_timestamp):
             # 'idle_max': max(idle_times) if idle_times else 0,
             # 'idle_min': min(idle_times) if idle_times else 0,
         }
+
+        ml_engine.process_flow(flow_statistics[flow_key], models)
 
         del active_flows[flow_key]
 
@@ -416,6 +420,7 @@ def display_final_statistics():
     print(f"\nTotal flows analyzed: {len(active_flows) + len(flow_statistics)}")
 
 def main():
+    global models
  
     print("="*80)
     print("    analyzer flow")
@@ -424,6 +429,8 @@ def main():
     print(f"Timeout UDP: {UDP_FLOW_TIMEOUT}s | TCP: {TCP_FLOW_TIMEOUT}s")
     print(f"Starting...")
     print("="*80)
+
+    models = ml_engine.load_models(".")
 
     
     #*snif packets 
