@@ -1,0 +1,185 @@
+{% extends "base.html" %}
+{% block title %}IDS Dashboard — Overview{% endblock %}
+
+{% block content %}
+<div class="page-header">
+    <h1>⬡ Threat Overview</h1>
+    <p>Real-time intrusion detection monitoring</p>
+</div>
+
+<!-- ── Summary Cards ──────────────────────────────── -->
+<div class="grid-4" style="margin-bottom: 1.5rem;">
+    <div class="card">
+        <div class="card-title">Total Alerts</div>
+        <div class="card-value" id="total-count" style="color: var(--accent-cyan);">{{ total }}</div>
+    </div>
+    <div class="card">
+        <div class="card-title">🔴 High Severity</div>
+        <div class="card-value severity-high" id="high-count">{{ high }}</div>
+    </div>
+    <div class="card">
+        <div class="card-title">🟡 Medium Severity</div>
+        <div class="card-value severity-medium" id="med-count">{{ medium }}</div>
+    </div>
+    <div class="card">
+        <div class="card-title">🟢 Low Severity</div>
+        <div class="card-value severity-low" id="low-count">{{ low }}</div>
+    </div>
+</div>
+
+<!-- ── Attack Type Breakdown ──────────────────────── -->
+<div style="margin-bottom: 1.5rem;">
+    <div class="card-title" style="margin-bottom: 0.75rem; padding-left: 4px;">Attack Type Breakdown</div>
+    <div class="attack-pills" id="attack-pills">
+        {% for atype, count in attack_counts.items() %}
+        <div class="attack-pill">
+            <span>{{ atype }}</span>
+            <span class="count">{{ count }}</span>
+        </div>
+        {% endfor %}
+    </div>
+</div>
+
+<!-- ── Alerts Over Time Chart ─────────────────────── -->
+<div class="chart-card" style="margin-bottom: 1.5rem;">
+    <h3>📈 Alerts Over Time</h3>
+    <canvas id="timelineChart" height="100"></canvas>
+</div>
+
+<!-- ── Latest 20 Alerts ───────────────────────────── -->
+<div style="margin-bottom: 1rem;">
+    <div class="card-title" style="padding-left: 4px;">Latest 20 Alerts</div>
+</div>
+<div class="table-wrap">
+    <table>
+        <thead>
+            <tr>
+                <th>Timestamp</th>
+                <th>Attack Type</th>
+                <th>Severity</th>
+                <th>Confidence</th>
+                <th>Source IP</th>
+                <th>Dest IP</th>
+                <th>Src Port</th>
+                <th>Dst Port</th>
+                <th>Protocol</th>
+                <th>Duration</th>
+            </tr>
+        </thead>
+        <tbody id="alerts-tbody">
+            {% for alert in latest %}
+            <tr class="row-{{ alert.severity|lower }}">
+                <td>{{ alert.timestamp[:19] }}</td>
+                <td>{{ alert.attack_type }}</td>
+                <td><span class="badge badge-{{ alert.severity|lower }}">{{ alert.severity }}</span></td>
+                <td>{{ "%.1f"|format(alert.confidence) }}%</td>
+                <td>{{ alert.src_ip }}</td>
+                <td>{{ alert.dst_ip }}</td>
+                <td>{{ alert.src_port }}</td>
+                <td>{{ alert.dst_port }}</td>
+                <td>{{ alert.protocol }}</td>
+                <td>{{ "%.4f"|format(alert.duration) }}s</td>
+            </tr>
+            {% endfor %}
+        </tbody>
+    </table>
+</div>
+{% endblock %}
+
+{% block scripts %}
+<script>
+    // ── Timeline Chart ───────────────────────────────────
+    const ctx = document.getElementById('timelineChart').getContext('2d');
+    let timelineChart = new Chart(ctx, {
+        type: 'line',
+        data: {
+            labels: {{ timeline_labels | tojson }},
+            datasets: [{
+                label: 'Alerts',
+                data: {{ timeline_data | tojson }},
+                borderColor: '#06d6a0',
+                backgroundColor: 'rgba(6, 214, 160, 0.08)',
+                borderWidth: 2,
+                fill: true,
+                tension: 0.4,
+                pointBackgroundColor: '#06d6a0',
+                pointBorderColor: '#0a0e17',
+                pointBorderWidth: 2,
+                pointRadius: 4,
+                pointHoverRadius: 6,
+            }]
+        },
+        options: {
+            responsive: true,
+            maintainAspectRatio: true,
+            plugins: {
+                legend: { display: false },
+            },
+            scales: {
+                x: {
+                    grid: { color: 'rgba(42, 53, 80, 0.4)' },
+                    ticks: { color: '#64748b', font: { family: 'JetBrains Mono', size: 10 }, maxRotation: 45 }
+                },
+                y: {
+                    beginAtZero: true,
+                    grid: { color: 'rgba(42, 53, 80, 0.4)' },
+                    ticks: { color: '#64748b', font: { family: 'JetBrains Mono', size: 11 } }
+                }
+            }
+        }
+    });
+
+    // ── Auto-Refresh (10 seconds) ────────────────────────
+    setInterval(async () => {
+        try {
+            const res = await fetch('/api/dashboard');
+            const data = await res.json();
+
+            // Update counters
+            document.getElementById('total-count').textContent = data.total;
+            document.getElementById('high-count').textContent = data.high;
+            document.getElementById('med-count').textContent = data.medium;
+            document.getElementById('low-count').textContent = data.low;
+
+            // Update attack pills
+            const pillsContainer = document.getElementById('attack-pills');
+            pillsContainer.innerHTML = '';
+            for (const [atype, count] of Object.entries(data.attack_counts)) {
+                const pill = document.createElement('div');
+                pill.className = 'attack-pill';
+                pill.innerHTML = `<span>${atype}</span><span class="count">${count}</span>`;
+                pillsContainer.appendChild(pill);
+            }
+
+            // Update table
+            const tbody = document.getElementById('alerts-tbody');
+            tbody.innerHTML = '';
+            data.latest.forEach(alert => {
+                const sev = (alert.severity || '').toLowerCase();
+                const tr = document.createElement('tr');
+                tr.className = `row-${sev}`;
+                tr.innerHTML = `
+                    <td>${(alert.timestamp || '').substring(0, 19)}</td>
+                    <td>${alert.attack_type}</td>
+                    <td><span class="badge badge-${sev}">${alert.severity}</span></td>
+                    <td>${alert.confidence.toFixed(1)}%</td>
+                    <td>${alert.src_ip}</td>
+                    <td>${alert.dst_ip}</td>
+                    <td>${alert.src_port}</td>
+                    <td>${alert.dst_port}</td>
+                    <td>${alert.protocol}</td>
+                    <td>${alert.duration.toFixed(4)}s</td>
+                `;
+                tbody.appendChild(tr);
+            });
+
+            // Update chart
+            timelineChart.data.labels = data.timeline_labels;
+            timelineChart.data.datasets[0].data = data.timeline_data;
+            timelineChart.update();
+        } catch (e) {
+            console.error('Auto-refresh failed:', e);
+        }
+    }, 10000);
+</script>
+{% endblock %}
